@@ -1,0 +1,83 @@
+name: 通过Alist上传
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      Url:
+        description: '下载URL'
+        required: true
+        default: 'https://网址##名称'
+      Folder:
+        description: '保存目录'
+        required: true
+        default: 'encrypt_folder'
+
+jobs:
+  Alist:
+    runs-on: ubuntu-latest
+    container: ubuntu
+    services:
+      alist:
+        image: xhofe/alist
+        env:
+          ALIST_ADMIN_PASSWORD: 'admin'
+        ports:
+        - 5244:5244
+      alist-encrypt:
+        image: ykxvk8yl5l/alist-encrypt:dev
+        env:
+          DAV_PASSWORD: '123456'
+          DAV_ENCNAME: true
+          DAV_ENABLE_OTHER: false
+        ports:
+        - 5344:5344
+    steps:
+      - uses: actions/checkout@v2
+      - name: Aria2 Install
+        run: apt-get update; apt-get install aria2 -y 
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: install prerequisites
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install install requests
+      - name: Downloading
+        id: downloading
+        run: |
+          url="${{ github.event.inputs.Url}}"
+          filename=${url##*##}
+          downloadurl=${url%##*}
+          aria2c --conf $GITHUB_WORKSPACE/aria2.conf --seed-time=0 -d downloads -c $downloadurl -o $filename
+          dfilename=$(ls downloads | head -n1)
+          echo "::set-output name=path::downloads/$filename"
+          echo "::set-output name=filename::$dfilename"
+      - name: Upload
+        id: upload
+        if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
+        run: |
+          python alist.py --fileName="${{ steps.downloading.outputs.filename }}"  --path="${{ steps.downloading.outputs.path }}" --storage_body="${{ secrets.ALIST_STORAGE_BODY }}"
+#       - name: rclone
+#         uses: wei/rclone@v1
+#         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
+#         env:
+#           RCLONE_CONF: ${{ secrets.RCLONE_ALIYUN_CONF }}
+#         with:
+#           args: copy ${{ steps.downloading.outputs.path }} alist:/encrypt_folder
+          
+      - name: Download another
+        uses: benc-uk/workflow-dispatch@v1
+        if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
+        with:
+          workflow: 通过Alist上传
+          token: ${{ secrets.TOKEN }}
+          ref: main    
+          
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v1.2.3
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 0
