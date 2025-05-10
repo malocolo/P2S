@@ -1,5 +1,4 @@
-name: Copy To Rclone on Linux
-
+name: Copy To Rclone on Mac
 on:
   repository_dispatch:
   workflow_dispatch:
@@ -11,114 +10,108 @@ on:
 
 env:
   FILE_PATH: 'downloads'
-
+  
 jobs:
   build:
-    runs-on: ubuntu-latest
-
-    # Only run when the repository owner triggers it
+    runs-on: macos-latest
     if: github.event.repository.owner.id == github.event.sender.id
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v2
         with:
-          persist-credentials: false       # use personal token for dispatch
-          fetch-depth: 0
-
-      - name: Increase available space (clean APT cache)
+          persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal token
+          fetch-depth: 0 
+      
+      - name: 增加可用空间 (删除dotnet, android、haskell、CodeQL)
+        shell: bash
         run: |
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /System/Volumes/Data/Library/Developer/CoreSimulator/Images/*.dmg
+          echo "硬盘详情："
           df -h
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            curl \
-            unzip \
-            aria2 \
-            nodejs \
-            postgresql       # Install PostgreSQL database server :contentReference[oaicite:4]{index=4}
 
       - name: Rclone Install
         run: |
-          curl https://rclone.org/install.sh | sudo bash   # Official Linux/macOS install script :contentReference[oaicite:5]{index=5}
+          curl https://rclone.org/install.sh | sudo bash
 
-      - name: Check dependencies
+      - name: Check depends
         run: |
           rclone -V
           aria2c -v
           node -v
-          python3 -V
-
+          python -V
+          
       - name: Set up Python 3.9
         uses: actions/setup-python@v2
         with:
-          python-version: 3.9    # Use GitHub’s Python action for consistency :contentReference[oaicite:6]{index=6}
-
-      - name: Configure Rclone
+          python-version: 3.9
+           
+      - name: Config Rclone
         run: |
-          mkdir -p ~/.config/rclone
-          echo "$RCLONE_ENV_FILE" > ~/.config/rclone/rclone.conf
+          printf "$RCLONE_ENV_FILE" >> ~/.config/rclone/rclone.conf
+        shell: bash
         env:
           RCLONE_ENV_FILE: ${{ secrets.RCLONE_CONF }}
 
-      - name: Install Python prerequisites
+      - name: install postgresql
+        run: |
+          brew install postgresql
+
+      - name: install prerequisites
         run: |
           python -m pip install --upgrade pip wheel
-          pip install \
-            lk21==1.5.61 \
-            pymongo \
-            pymongo[srv] \
-            pymongo[tls] \
-            certifi \
-            SQLAlchemy \
-            psycopg2-binary
-
+          pip install lk21==1.5.61 pymongo pymongo[srv] pymongo[tls] certifi SQLAlchemy psycopg2-binary
+          
       - name: Downloading
         id: downloading
         run: |
-          mkdir -p downloads
+          mkdir downloads
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
           filename=$(ls downloads | head -n1)
-          folder=$(sh folder.sh "$filename")
+          folder=$(sh folder.sh $filename)
           echo "::set-output name=path::downloads/$filename"
           echo "::set-output name=filename::$filename"
           echo "::set-output name=folder::$folder"
-          size=$(stat -c%s "downloads/$filename")
+          size=$(ls -l downloads/$filename | awk '{print $5}')
+          echo $size
           echo "::set-output name=size::$size"
 
-      - name: Rclone copy
+      - name: rclone copy
         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
         run: |
-          rclone copy "${{ steps.downloading.outputs.path }}" SPVR:/"${{ steps.downloading.outputs.folder }}"
+          rclone copy \
+            "${{ steps.downloading.outputs.path }}" \
+            "SPVR:/${{ steps.downloading.outputs.folder }}" \
+            --progress \
+            --stats 1s \
+            --verbose
 
-      - name: Save data
+      - name: Save Data
         id: database
         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
         run: |
           python task.py --opt="delete" --con="${{ secrets.DB_CONNECT }}" --name="${{ steps.downloading.outputs.filename }}"
           echo "::set-output name=status::ok"
 
-      - name: Dispatch next run
+      - name: Download another right now
         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
         run: |
-          curl -L -X POST \
+          curl -L \
+            -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.TOKEN }}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/ykxVK8yL5L/pikpak2cloud/actions/workflows/Linux-Rclone.yml/dispatches \
+            https://api.github.com/repos/ykxVK8yL5L/pikpak2cloud/actions/workflows/Mac-Rclone.yml/dispatches \
             -d '{"ref":"main","inputs":{}}'
 
-      - name: Notify upload result
+      - name: 通知上传结果
         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
         run: |
-          wget -O /dev/null -o /dev/null \
-            "${{ secrets.BARK_KEY }}?title=上传结果&icon=https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png&group=Actions&body=${{ steps.downloading.outputs.filename }}上传成功&isArchive=0"
-
-      - name: Delete old workflow runs
+          wget -O /dev/null -o /dev/null "${{ secrets.BARK_KEY }}?title=上传结果&icon=https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png&group=Actions&body=${{ steps.downloading.outputs.filename }}上传成功&isArchive=0"
+         
+      - name: Delete workflow runs
         uses: Mattraks/delete-workflow-runs@v1.2.3
         with:
           token: ${{ github.token }}
