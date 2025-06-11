@@ -4,9 +4,9 @@
 input="$1"
 case "$input" in
   *[vV][rR]* )
-    echo "Leaked"
+    echo "VR"
     ;;
   * )
-    echo "Leaked"
+    echo "2D"
     ;;
 esac
