@@ -73,7 +73,7 @@ if __name__ == "__main__":
             quit()
         urlinfo = task.url.split("##")
         cmd = (
-            'aria2c --conf aria2.conf --seed-time=0 -o "'
+            'aria2c --conf aria2.conf --seed-time=0 --check-certificate=false -o "'
             + urlinfo[1]
             + '" -d downloads -c "'
             + urlinfo[0]
