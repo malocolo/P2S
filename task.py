@@ -34,6 +34,7 @@ class Task(Base):
 
 def find_one_and_update():
     try:
+        # 直接使用全局 db，不创建新 Session，防止 persistent 报错
         task = db.query(Task).filter(Task.status == "draft").first()
         if task:
             task.status = "published"
@@ -66,28 +67,20 @@ if __name__ == "__main__":
             
         urlinfo = task.url.split("##")
         if len(urlinfo) >= 2:
-            download_url = urlinfo[0]
-            file_name = urlinfo[1]
+            download_url = urlinfo[0] # 链接在左
+            file_name = urlinfo[1]    # 文件名在右
         else:
             print(f"Error: URL format incorrect")
             quit()
 
-        # 创建 Cookie 文件
-        cookie_file = "aria2_cookies.txt"
-        with open(cookie_file, 'w') as f:
-            f.write("")
-
         # 构建命令
-        # -s 1 -x 1: 强制单线程，防止多线程竞争导致验证失败
-        # --save/load-cookies: 处理重定向会话
+        # 1. 指定完整的 config 路径
+        # 2. 增加 Referer 帮助通过验证
         cmd = (
             f'aria2c --conf-path=aria2.conf '
             f'--dir=downloads '
             f'--out="{file_name}" '
             f'--referer="{download_url}" ' 
-            f'--save-cookies="{cookie_file}" '
-            f'--load-cookies="{cookie_file}" '
-            f'-s 1 -x 1 ' 
             f'--console-log-level=notice '
             f'"{download_url}"'
         )
