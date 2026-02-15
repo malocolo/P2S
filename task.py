@@ -60,7 +60,6 @@ def delete_task():
     except Exception as e:
         print(f"Error deleting task: {e}")
 
-# === 提取 IPFS CID ===
 def extract_ipfs_cid(url):
     # 匹配 bafy... (v1) 或 Qm... (v0)
     match = re.search(r'(bafy[a-zA-Z0-9]{40,}|Qm[a-zA-Z0-9]{44})', url)
@@ -68,31 +67,35 @@ def extract_ipfs_cid(url):
         return match.group(1)
     return None
 
-# === 单次下载尝试函数 ===
 def try_download_url(session, url, filename, description):
     print(f"--- 尝试策略: {description} ---")
     print(f"    URL: {url}")
     try:
         start_time = time.time()
-        # 允许重定向，这样如果原始链接跳转，我们能拿到最终 URL
-        response = session.get(url, stream=True, timeout=20, allow_redirects=True)
+        # 增加 connect timeout, 减少 read timeout
+        response = session.get(url, stream=True, timeout=(10, 30), allow_redirects=True)
         
-        # === 核心修改：即使 403，也检查 URL 是否泄露了 CID ===
         final_url = response.url
         
+        # 捕获 403 但返回 URL 供提取 CID
         if response.status_code == 403:
-            print(f"[!] 403 Forbidden - {final_url}")
-            # 返回失败，但把最终 URL 带出去，供提取 CID
+            print(f"[!] 403 Forbidden (IP限制) - {final_url}")
             return False, final_url
             
-        if response.status_code == 404:
-            print(f"[!] 404 Not Found")
+        if response.status_code == 404 or response.status_code == 502:
+            print(f"[!] {response.status_code} - 文件未找到或网关错误")
             return False, final_url
             
         response.raise_for_status()
 
-        # 开始下载
         total_size = int(response.headers.get('content-length', 0))
+        
+        # 检查内容类型，避免下载到 HTML 错误页
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' in content_type and total_size < 100000:
+             print("[!] 警告: 返回的是 HTML 页面，可能是错误提示，跳过。")
+             return False, final_url
+
         if total_size > 0:
             print(f"[*] 连接成功! 大小: {total_size / 1024 / 1024:.2f} MB")
         else:
@@ -116,13 +119,15 @@ def try_download_url(session, url, filename, description):
         
     except Exception as e:
         print(f"[!] 错误: {e}")
-        return False, url # 返回尝试过的 URL
+        return False, url
 
-# === 主引擎 ===
 def download_engine(initial_url, filename, user_agent):
     print(f"[*] 启动下载任务: {filename}")
     
-    # 基础 headers
+    # 提取纯文件名 (用于 IPFS 路径)
+    # 之前错误的原因是把 downloads/xx.mp4 拼进去了
+    clean_filename = os.path.basename(filename) 
+    
     parsed = urlparse(initial_url)
     domain = f"{parsed.scheme}://{parsed.netloc}/"
     
@@ -132,38 +137,53 @@ def download_engine(initial_url, filename, user_agent):
         'Referer': domain,
     })
 
-    # 1. 首先尝试原始链接
+    # 1. 尝试原始链接
     success, last_url = try_download_url(session, initial_url, filename, "原始链接")
     if success:
         return True
 
-    # 2. 如果失败，检查最后一次的 URL 是否包含 CID
-    print(f"[*] 检查跳转后的链接是否包含 CID: {last_url}")
+    # 2. 穿墙模式
+    print(f"[*] 检查链接是否包含 CID: {last_url}")
     cid = extract_ipfs_cid(last_url)
-    
     if not cid:
-        # 如果原始链接里本身就有 CID，但没跳转就失败了
         cid = extract_ipfs_cid(initial_url)
 
     if cid:
-        print(f"[*] 捕获到 IPFS CID: {cid}，启动穿墙模式...")
+        print(f"[*] 捕获到 IPFS CID: {cid}，启动公共网关轮询...")
+        session.headers.pop('Referer', None) # 公共网关不需要 Referer
         
-        # 公共网关列表 (优先 Cloudflare)
-        gateways = [
-            ("Cloudflare", f"https://cloudflare-ipfs.com/ipfs/{cid}/{filename}"),
-            ("IPFS.io", f"https://ipfs.io/ipfs/{cid}/{filename}"),
-            ("4EVERLAND", f"https://4everland.io/ipfs/{cid}/{filename}"),
-            ("Dweb", f"https://dweb.link/ipfs/{cid}/{filename}")
+        # 不同的路径组合
+        # 组合1: ipfs/<cid>/<filename> (针对文件夹 CID)
+        # 组合2: ipfs/<cid> (针对文件 CID)
+        paths_to_try = [
+            clean_filename, # 优先尝试带文件名
+            ""              # 其次尝试纯 CID
         ]
         
-        for name, gw_url in gateways:
-            # 清除 Referer，因为公共网关不需要原来的 Referer
-            session.headers.pop('Referer', None)
-            success, _ = try_download_url(session, gw_url, filename, f"公共网关 [{name}]")
-            if success:
-                return True
+        # 优质公共网关列表
+        base_gateways = [
+            "https://gateway.pinata.cloud/ipfs",
+            "https://ipfs.io/ipfs",
+            "https://dweb.link/ipfs",
+            "https://4everland.io/ipfs",
+            "https://w3s.link/ipfs"
+        ]
+        
+        for path_suffix in paths_to_try:
+            for base_gw in base_gateways:
+                # 拼接 URL
+                if path_suffix:
+                    gw_url = f"{base_gw}/{cid}/{path_suffix}"
+                    desc = f"网关[{base_gw}] + 文件名"
+                else:
+                    gw_url = f"{base_gw}/{cid}"
+                    desc = f"网关[{base_gw}] + 纯CID"
+                
+                success, _ = try_download_url(session, gw_url, filename, desc)
+                if success:
+                    return True
     else:
-        print("[!] 未能提取到 CID，无法使用公共网关。")
+        print("[!] 未能提取到 CID。")
 
     return False
 
@@ -179,14 +199,13 @@ if __name__ == "__main__":
             raw_url = urlinfo[0]
             file_name = urlinfo[1]
             
-            # 确保下载目录存在
             if not os.path.exists("downloads"):
                 os.makedirs("downloads")
             
             save_path = os.path.join("downloads", file_name)
             
-            # 伪装 UA
-            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+            # 使用更通用的 UA
+            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             
             if not download_engine(raw_url, save_path, ua):
                 print("[X] 最终失败。")
