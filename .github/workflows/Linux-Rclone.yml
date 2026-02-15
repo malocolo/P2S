@@ -14,7 +14,8 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # === ⚠️ 必须使用 ubuntu-22.04 才能兼容 WARP 和旧版依赖 ===
+    runs-on: ubuntu-22.04
 
     # Only run when the repository owner triggers it
     if: github.event.repository.owner.id == github.event.sender.id
@@ -25,6 +26,13 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      # === 🟢 开启 Cloudflare WARP (解决重定向死循环/403的核心) ===
+      - name: Set up Cloudflare WARP
+        uses: fscarmen/warp-on-actions@v1.3
+        with:
+          stack: ipv4
+      # ========================================================
 
       - name: Increase available space (clean APT cache)
         run: |
@@ -40,7 +48,6 @@ jobs:
             unzip \
             nodejs \
             postgresql
-          # 注意：不安装官方 aria2，改用下方增强版
 
       # === 安装 Aria2 Pro (增强版) ===
       - name: Install Aria2 Pro (Enhanced)
@@ -50,7 +57,6 @@ jobs:
           chmod +x aria2c
           sudo mv aria2c /usr/local/bin/
           aria2c -v
-      # ==============================
 
       - name: Rclone Install
         run: |
@@ -92,12 +98,13 @@ jobs:
         run: |
           mkdir -p downloads
           
-          # 运行 Python 脚本
+          # 运行 Python 脚本 (调用 Aria2)
+          # 此时流量已通过 WARP，Aria2 将获得 clean IP
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
           
           filename=$(ls downloads | head -n1)
           
-          # 安全检查：如果目录为空，直接报错退出
+          # 安全检查
           if [ -z "$filename" ]; then
             echo "Error: 下载失败，downloads 目录为空。"
             exit 1
@@ -105,7 +112,7 @@ jobs:
           
           folder=$(sh folder.sh "$filename")
           
-          # 输出变量 (新版语法)
+          # 输出变量
           echo "path=downloads/$filename" >> $GITHUB_OUTPUT
           echo "filename=$filename" >> $GITHUB_OUTPUT
           echo "folder=$folder" >> $GITHUB_OUTPUT
