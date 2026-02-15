@@ -14,8 +14,7 @@ env:
 
 jobs:
   build:
-    # === 🟢 关键修改：强制使用 Ubuntu 22.04 以兼容 WARP 插件 ===
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     # Only run when the repository owner triggers it
     if: github.event.repository.owner.id == github.event.sender.id
@@ -26,13 +25,6 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-
-      # === 开启 Cloudflare WARP (解决 IP 403 封锁) ===
-      - name: Set up Cloudflare WARP
-        uses: fscarmen/warp-on-actions@v1.3
-        with:
-          stack: ipv4 # 强制 IPv4
-      # ================================================
 
       - name: Increase available space (clean APT cache)
         run: |
@@ -48,6 +40,17 @@ jobs:
             unzip \
             nodejs \
             postgresql
+          # 注意：这里不安装 apt 的 aria2
+
+      # === 核心：手动安装 Aria2 Pro (增强版) ===
+      - name: Install Aria2 Pro (Enhanced)
+        run: |
+          wget -q https://github.com/P3TERX/Aria2-Pro-Core/releases/download/1.36.0_2021.08.22/aria2-1.36.0-static-linux-amd64.tar.gz
+          tar -zxvf aria2-1.36.0-static-linux-amd64.tar.gz
+          chmod +x aria2c
+          sudo mv aria2c /usr/local/bin/
+          aria2c -v
+      # ========================================
 
       - name: Rclone Install
         run: |
@@ -56,6 +59,7 @@ jobs:
       - name: Check dependencies
         run: |
           rclone -V
+          aria2c -v
           node -v
           python3 -V
 
@@ -75,7 +79,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel
           pip install \
-            requests \
             lk21==1.5.61 \
             pymongo \
             pymongo[srv] \
@@ -89,11 +92,9 @@ jobs:
         run: |
           mkdir -p downloads
           
-          # 运行 Python 全能下载脚本 (task.py)
-          # 此时流量通过 WARP 转发，IP 为 Cloudflare IP，可绕过封锁
+          # 运行 Python 脚本
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
           
-          # 验证下载结果
           filename=$(ls downloads | head -n1)
           
           # 安全检查
@@ -104,7 +105,7 @@ jobs:
           
           folder=$(sh folder.sh "$filename")
           
-          # 输出变量
+          # 新版 Output 语法
           echo "path=downloads/$filename" >> $GITHUB_OUTPUT
           echo "filename=$filename" >> $GITHUB_OUTPUT
           echo "folder=$folder" >> $GITHUB_OUTPUT
