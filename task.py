@@ -71,15 +71,30 @@ if __name__ == "__main__":
         if task is None:
             print("没有找到相关记录")
             quit()
+            
         urlinfo = task.url.split("##")
+        file_name = urlinfo[0]
+        download_url = urlinfo[1]
+
+        # 构建命令
+        # 注意：这里使用 f-string 更加清晰
+        # 确保 aria2.conf 就在脚本同级目录下
         cmd = (
-            'aria2c --conf aria2.conf --seed-time=0 --check-certificate=false -o "'
-            + urlinfo[1]
-            + '" -d downloads -c "'
-            + urlinfo[0]
-            + '"'
+            f'aria2c --conf-path=aria2.conf '
+            f'--seed-time=0 '
+            f'--dir=downloads '
+            f'--out="{file_name}" '
+            f'"{download_url}"'
         )
+
+        print("-" * 20)
+        print(f"正在下载: {file_name}")
+        print(f"下载链接: {download_url}")
+        print(f"执行命令: {cmd}")
+        print("-" * 20)
+
         os.system(cmd)
         quit()
+
     if args.opt == "delete":
         delete_task()
