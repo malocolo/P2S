@@ -23,7 +23,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
         with:
-          persist-credentials: false       # use personal token for dispatch
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Increase available space (clean APT cache)
@@ -38,9 +38,18 @@ jobs:
           sudo apt-get install -y \
             curl \
             unzip \
-            aria2 \
             nodejs \
             postgresql
+          # 注意：删除了这里的 aria2，改为下面单独安装增强版
+
+      # === 新增步骤：安装增强版 Aria2 (支持 403 重试) ===
+      - name: Install Aria2 Pro (Enhanced)
+        run: |
+          wget -q https://github.com/P3TERX/aria2-builder/releases/download/1.37.0_2023.09.06/aria2-1.37.0-linux-gnu-64bit-build1.tar.gz
+          tar -zxvf aria2-1.37.0-linux-gnu-64bit-build1.tar.gz
+          chmod +x aria2c
+          sudo mv aria2c /usr/local/bin/
+      # ==================================================
 
       - name: Rclone Install
         run: |
@@ -81,6 +90,7 @@ jobs:
         id: downloading
         run: |
           mkdir -p downloads
+          # 确保 task.py 生成或使用的配置文件包含 retry-on-403=true
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
           filename=$(ls downloads | head -n1)
           folder=$(sh folder.sh "$filename")
