@@ -29,7 +29,7 @@ engine = create_engine(
 # 创建会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# === 核心修改：实例化一个全局 db 会话，后续所有操作都用这个 ===
+# 全局 db 会话
 db = SessionLocal()
 Base = declarative_base()
 
@@ -44,7 +44,6 @@ class Task(Base):
 
 
 def find_one_and_update():
-    # === 修正：直接使用全局 db，不要再创建新的 session ===
     try:
         task = db.query(Task).filter(Task.status == "draft").first()
         if task:
@@ -59,11 +58,8 @@ def find_one_and_update():
 
 
 def delete_task():
-    # === 修正：直接使用全局 db ===
     try:
         keyword = "##" + args.name
-        # 注意：这里可能需要根据实际情况调整 query 逻辑
-        # 如果你的 url 格式是 "链接##文件名"，且你要根据文件名删除
         task = db.query(Task).filter(Task.url.like(f"%{keyword}")).first()
         if task is not None:
             db.delete(task)
@@ -79,15 +75,13 @@ if __name__ == "__main__":
     if args.opt == "query":
         task = find_one_and_update()
         
-        # 如果没有任务，正常退出，不要报错
         if task is None:
             print("没有找到 'draft' 状态的任务。")
             quit()
             
         urlinfo = task.url.split("##")
         
-        # === 再次确认：根据你之前的报错日志，[0]是链接，[1]是文件名 ===
-        # 如果之前报错 Unrecognized URI ... .mp4，说明 [0] 必须是 http 链接
+        # 确保格式正确：[0]是链接，[1]是文件名
         if len(urlinfo) >= 2:
             download_url = urlinfo[0]
             file_name = urlinfo[1]
@@ -95,25 +89,46 @@ if __name__ == "__main__":
             print(f"Error: URL format incorrect: {task.url}")
             quit()
 
-        # 构建命令：确保包含重试逻辑
+        # === 关键修改 ===
+        # 1. 创建一个临时的 cookies 文件路径
+        cookie_file = "aria2_cookies.txt"
+        
+        # 2. 构造 User-Agent (模拟 Chrome)
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+        # 构建命令
+        # --header="Cookie: ..." : 如果你能获取到浏览器里的 Cookie，可以在这里加上
+        # --save-cookies / --load-cookies : 解决无限重定向的核心
+        # --referer : 解决防盗链
         cmd = (
             f'aria2c --conf-path=aria2.conf '
             f'--seed-time=0 '
             f'--dir=downloads '
             f'--out="{file_name}" '
             f'--console-log-level=notice '
+            f'--user-agent="{ua}" '
+            f'--referer="{download_url}" '
+            f'--save-cookies="{cookie_file}" '
+            f'--load-cookies="{cookie_file}" '
             f'"{download_url}"'
         )
 
         print("-" * 20)
         print(f"正在下载: {file_name}")
         print(f"下载链接: {download_url}")
-        print(f"执行命令: {cmd}")
+        print(f"Referer: {download_url}")
         print("-" * 20)
 
         # 执行下载
         exit_code = os.system(cmd)
         
+        # 清理 cookie 文件 (可选)
+        if os.path.exists(cookie_file):
+            try:
+                os.remove(cookie_file)
+            except:
+                pass
+
         # 下载失败处理
         if exit_code != 0:
             print(f"错误: 下载失败，退出码 {exit_code}")
