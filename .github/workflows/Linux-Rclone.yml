@@ -40,16 +40,7 @@ jobs:
             unzip \
             nodejs \
             postgresql
-          # 注意：删除了这里的 aria2，改为下面单独安装增强版
-
-      # === 新增步骤：安装增强版 Aria2 (支持 403 重试) ===
-      - name: Install Aria2 Pro (Enhanced)
-        run: |
-          wget -q https://github.com/P3TERX/Aria2-Pro-Core/releases/download/1.36.0_2021.08.22/aria2-1.36.0-static-linux-amd64.tar.gz
-          tar -zxvf aria2-1.36.0-static-linux-amd64.tar.gz
-          chmod +x aria2c
-          sudo mv aria2c /usr/local/bin/
-      # ==================================================
+          # === 修改：彻底删除了 Aria2 的安装，因为 Python 脚本现在全权负责下载 ===
 
       - name: Rclone Install
         run: |
@@ -58,9 +49,9 @@ jobs:
       - name: Check dependencies
         run: |
           rclone -V
-          aria2c -v
           node -v
           python3 -V
+          # === 修改：删除了 aria2c -v 检查 ===
 
       - name: Set up Python 3.9
         uses: actions/setup-python@v2
@@ -78,6 +69,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel
           pip install \
+            requests \
             lk21==1.5.61 \
             pymongo \
             pymongo[srv] \
@@ -85,20 +77,20 @@ jobs:
             certifi \
             SQLAlchemy \
             psycopg2-binary
+          # === 修改：显式添加了 requests 库，确保 task.py 运行正常 ===
 
       - name: Downloading
         id: downloading
         run: |
           mkdir -p downloads
           
-          # 运行 Python 脚本
-          # (前提：请确保你已经按我上一条回复，修正了 task.py 里 url 和 filename 的顺序)
+          # 运行 Python 全能下载脚本
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
           
-          # 获取文件名
+          # 验证下载结果
           filename=$(ls downloads | head -n1)
           
-          # === 安全检查：如果下载失败（目录是空的），直接报错退出，避免后续步骤出错 ===
+          # 安全检查
           if [ -z "$filename" ]; then
             echo "Error: 下载失败，downloads 目录为空。"
             exit 1
@@ -106,7 +98,7 @@ jobs:
           
           folder=$(sh folder.sh "$filename")
           
-          # === 修正点：使用新版 GITHUB_OUTPUT 语法 (消除黄色警告) ===
+          # 输出变量 (新版语法)
           echo "path=downloads/$filename" >> $GITHUB_OUTPUT
           echo "filename=$filename" >> $GITHUB_OUTPUT
           echo "folder=$folder" >> $GITHUB_OUTPUT
@@ -129,7 +121,8 @@ jobs:
         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
         run: |
           python task.py --opt="delete" --con="${{ secrets.DB_CONNECT }}" --name="${{ steps.downloading.outputs.filename }}"
-          echo "::set-output name=status::ok"
+          # === 修改：修复了这里残留的旧版 set-output 语法 ===
+          echo "status=ok" >> $GITHUB_OUTPUT
 
       - name: Dispatch next run
         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
