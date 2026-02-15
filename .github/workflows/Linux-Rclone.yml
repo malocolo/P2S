@@ -26,6 +26,13 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # === 🟢 核心修改：开启 Cloudflare WARP (解决 IP 403 封锁) ===
+      - name: Set up Cloudflare WARP
+        uses: fscarmen/warp-on-actions@v1.3
+        with:
+          stack: ipv4 # 强制 IPv4，兼容性最好
+      # =========================================================
+
       - name: Increase available space (clean APT cache)
         run: |
           sudo apt-get clean
@@ -40,7 +47,7 @@ jobs:
             unzip \
             nodejs \
             postgresql
-          # === 修改：彻底删除了 Aria2 的安装，因为 Python 脚本现在全权负责下载 ===
+          # 已移除 aria2 安装步骤，不再需要
 
       - name: Rclone Install
         run: |
@@ -51,7 +58,7 @@ jobs:
           rclone -V
           node -v
           python3 -V
-          # === 修改：删除了 aria2c -v 检查 ===
+          # 已移除 aria2c -v 检查
 
       - name: Set up Python 3.9
         uses: actions/setup-python@v2
@@ -68,6 +75,7 @@ jobs:
       - name: Install Python prerequisites
         run: |
           python -m pip install --upgrade pip wheel
+          # 显式添加 requests，确保 task.py 稳定运行
           pip install \
             requests \
             lk21==1.5.61 \
@@ -77,20 +85,20 @@ jobs:
             certifi \
             SQLAlchemy \
             psycopg2-binary
-          # === 修改：显式添加了 requests 库，确保 task.py 运行正常 ===
 
       - name: Downloading
         id: downloading
         run: |
           mkdir -p downloads
           
-          # 运行 Python 全能下载脚本
+          # 运行 Python 全能下载脚本 (task.py)
+          # 注意：此时网络流量已通过 WARP 转发，IP 不再是 Azure 数据中心
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
           
           # 验证下载结果
           filename=$(ls downloads | head -n1)
           
-          # 安全检查
+          # 安全检查：如果目录为空，说明下载失败，直接报错退出
           if [ -z "$filename" ]; then
             echo "Error: 下载失败，downloads 目录为空。"
             exit 1
@@ -98,7 +106,7 @@ jobs:
           
           folder=$(sh folder.sh "$filename")
           
-          # 输出变量 (新版语法)
+          # 输出变量 (使用新版 GITHUB_OUTPUT 语法)
           echo "path=downloads/$filename" >> $GITHUB_OUTPUT
           echo "filename=$filename" >> $GITHUB_OUTPUT
           echo "folder=$folder" >> $GITHUB_OUTPUT
@@ -121,7 +129,6 @@ jobs:
         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
         run: |
           python task.py --opt="delete" --con="${{ secrets.DB_CONNECT }}" --name="${{ steps.downloading.outputs.filename }}"
-          # === 修改：修复了这里残留的旧版 set-output 语法 ===
           echo "status=ok" >> $GITHUB_OUTPUT
 
       - name: Dispatch next run
