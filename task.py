@@ -34,7 +34,7 @@ class Task(Base):
 
 def find_one_and_update():
     try:
-        # 直接使用全局 db
+        # 直接使用全局 db，不要创建新的 Session
         task = db.query(Task).filter(Task.status == "draft").first()
         if task:
             task.status = "published"
@@ -67,14 +67,16 @@ if __name__ == "__main__":
             
         urlinfo = task.url.split("##")
         if len(urlinfo) >= 2:
-            download_url = urlinfo[0] # 链接在前
-            file_name = urlinfo[1]    # 文件名在后
+            download_url = urlinfo[0] # 链接在左
+            file_name = urlinfo[1]    # 文件名在右
         else:
             print(f"Error: URL format incorrect")
             quit()
 
         # 构建命令
-        # 增加 --referer 模拟浏览器来源，有助于减少 403
+        # 1. 指定配置文件路径
+        # 2. 指定 User-Agent (配置文件里有，但命令行指定更稳)
+        # 3. 指定 Referer (重要！)
         cmd = (
             f'aria2c --conf-path=aria2.conf '
             f'--dir=downloads '
