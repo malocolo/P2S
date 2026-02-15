@@ -14,7 +14,8 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # === 🟢 关键修改：强制使用 Ubuntu 22.04 以兼容 WARP 插件 ===
+    runs-on: ubuntu-22.04
 
     # Only run when the repository owner triggers it
     if: github.event.repository.owner.id == github.event.sender.id
@@ -26,12 +27,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # === 🟢 核心修改：开启 Cloudflare WARP (解决 IP 403 封锁) ===
+      # === 开启 Cloudflare WARP (解决 IP 403 封锁) ===
       - name: Set up Cloudflare WARP
         uses: fscarmen/warp-on-actions@v1.3
         with:
-          stack: ipv4 # 强制 IPv4，兼容性最好
-      # =========================================================
+          stack: ipv4 # 强制 IPv4
+      # ================================================
 
       - name: Increase available space (clean APT cache)
         run: |
@@ -47,7 +48,6 @@ jobs:
             unzip \
             nodejs \
             postgresql
-          # 已移除 aria2 安装步骤，不再需要
 
       - name: Rclone Install
         run: |
@@ -58,7 +58,6 @@ jobs:
           rclone -V
           node -v
           python3 -V
-          # 已移除 aria2c -v 检查
 
       - name: Set up Python 3.9
         uses: actions/setup-python@v2
@@ -75,7 +74,6 @@ jobs:
       - name: Install Python prerequisites
         run: |
           python -m pip install --upgrade pip wheel
-          # 显式添加 requests，确保 task.py 稳定运行
           pip install \
             requests \
             lk21==1.5.61 \
@@ -92,13 +90,13 @@ jobs:
           mkdir -p downloads
           
           # 运行 Python 全能下载脚本 (task.py)
-          # 注意：此时网络流量已通过 WARP 转发，IP 不再是 Azure 数据中心
+          # 此时流量通过 WARP 转发，IP 为 Cloudflare IP，可绕过封锁
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
           
           # 验证下载结果
           filename=$(ls downloads | head -n1)
           
-          # 安全检查：如果目录为空，说明下载失败，直接报错退出
+          # 安全检查
           if [ -z "$filename" ]; then
             echo "Error: 下载失败，downloads 目录为空。"
             exit 1
@@ -106,7 +104,7 @@ jobs:
           
           folder=$(sh folder.sh "$filename")
           
-          # 输出变量 (使用新版 GITHUB_OUTPUT 语法)
+          # 输出变量
           echo "path=downloads/$filename" >> $GITHUB_OUTPUT
           echo "filename=$filename" >> $GITHUB_OUTPUT
           echo "folder=$folder" >> $GITHUB_OUTPUT
