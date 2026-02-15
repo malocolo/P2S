@@ -14,7 +14,7 @@ env:
 
 jobs:
   build:
-    # === ⚠️ 关键修改：必须使用 ubuntu-22.04 以支持 WARP ===
+    # === ⚠️ 必须使用 ubuntu-22.04 才能兼容 WARP 和旧版依赖 ===
     runs-on: ubuntu-22.04
 
     # Only run when the repository owner triggers it
@@ -27,12 +27,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # === 开启 Cloudflare WARP (解决 IP 403/重定向死循环) ===
+      # === 🟢 开启 Cloudflare WARP (解决重定向死循环/403的核心) ===
       - name: Set up Cloudflare WARP
         uses: fscarmen/warp-on-actions@v1.3
         with:
           stack: ipv4
-      # ======================================================
+      # ========================================================
 
       - name: Increase available space (clean APT cache)
         run: |
@@ -99,7 +99,7 @@ jobs:
           mkdir -p downloads
           
           # 运行 Python 脚本 (调用 Aria2)
-          # 流量通过 WARP，解决 403
+          # 此时流量已通过 WARP，Aria2 将获得 clean IP
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
           
           filename=$(ls downloads | head -n1)
