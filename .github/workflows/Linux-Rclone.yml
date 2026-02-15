@@ -90,15 +90,29 @@ jobs:
         id: downloading
         run: |
           mkdir -p downloads
-          # 确保 task.py 生成或使用的配置文件包含 retry-on-403=true
+          
+          # 运行 Python 脚本
+          # (前提：请确保你已经按我上一条回复，修正了 task.py 里 url 和 filename 的顺序)
           python task.py --opt="query" --con="${{ secrets.DB_CONNECT }}"
+          
+          # 获取文件名
           filename=$(ls downloads | head -n1)
+          
+          # === 安全检查：如果下载失败（目录是空的），直接报错退出，避免后续步骤出错 ===
+          if [ -z "$filename" ]; then
+            echo "Error: 下载失败，downloads 目录为空。"
+            exit 1
+          fi
+          
           folder=$(sh folder.sh "$filename")
-          echo "::set-output name=path::downloads/$filename"
-          echo "::set-output name=filename::$filename"
-          echo "::set-output name=folder::$folder"
+          
+          # === 修正点：使用新版 GITHUB_OUTPUT 语法 (消除黄色警告) ===
+          echo "path=downloads/$filename" >> $GITHUB_OUTPUT
+          echo "filename=$filename" >> $GITHUB_OUTPUT
+          echo "folder=$folder" >> $GITHUB_OUTPUT
+          
           size=$(stat -c%s "downloads/$filename")
-          echo "::set-output name=size::$size"
+          echo "size=$size" >> $GITHUB_OUTPUT
 
       - name: Rclone copy
         if: steps.downloading.outputs.filename != '' && !cancelled() && !failure()
