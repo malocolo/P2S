@@ -40,9 +40,9 @@ jobs:
             unzip \
             nodejs \
             postgresql
-          # 注意：这里不安装 apt 的 aria2
+          # 注意：不安装官方 aria2，改用下方增强版
 
-      # === 核心：手动安装 Aria2 Pro (增强版) ===
+      # === 安装 Aria2 Pro (增强版) ===
       - name: Install Aria2 Pro (Enhanced)
         run: |
           wget -q https://github.com/P3TERX/Aria2-Pro-Core/releases/download/1.36.0_2021.08.22/aria2-1.36.0-static-linux-amd64.tar.gz
@@ -50,7 +50,7 @@ jobs:
           chmod +x aria2c
           sudo mv aria2c /usr/local/bin/
           aria2c -v
-      # ========================================
+      # ==============================
 
       - name: Rclone Install
         run: |
@@ -97,7 +97,7 @@ jobs:
           
           filename=$(ls downloads | head -n1)
           
-          # 安全检查
+          # 安全检查：如果目录为空，直接报错退出
           if [ -z "$filename" ]; then
             echo "Error: 下载失败，downloads 目录为空。"
             exit 1
@@ -105,7 +105,7 @@ jobs:
           
           folder=$(sh folder.sh "$filename")
           
-          # 新版 Output 语法
+          # 输出变量 (新版语法)
           echo "path=downloads/$filename" >> $GITHUB_OUTPUT
           echo "filename=$filename" >> $GITHUB_OUTPUT
           echo "folder=$folder" >> $GITHUB_OUTPUT
