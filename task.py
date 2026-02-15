@@ -72,14 +72,14 @@ if __name__ == "__main__":
             print(f"Error: URL format incorrect")
             quit()
 
-        # === 关键修改 1: 创建一个空的 cookie 文件 ===
+        # 创建 Cookie 文件
         cookie_file = "aria2_cookies.txt"
         with open(cookie_file, 'w') as f:
             f.write("")
 
-        # === 关键修改 2: 构建命令 ===
-        # --save-cookies / --load-cookies: 让 Aria2 能够处理重定向时的会话保持
-        # -s 1 -x 1: 强制单线程下载。对于这种敏感的网关，多线程很容易导致 403 或重置连接
+        # 构建命令
+        # -s 1 -x 1: 强制单线程，防止多线程竞争导致验证失败
+        # --save/load-cookies: 处理重定向会话
         cmd = (
             f'aria2c --conf-path=aria2.conf '
             f'--dir=downloads '
@@ -95,7 +95,6 @@ if __name__ == "__main__":
         print("-" * 20)
         print(f"正在下载: {file_name}")
         print(f"下载链接: {download_url}")
-        print("已启用 Cookie 会话保持和单线程模式")
         print("-" * 20)
 
         exit_code = os.system(cmd)
