@@ -45,8 +45,8 @@ jobs:
       # === 新增步骤：安装增强版 Aria2 (支持 403 重试) ===
       - name: Install Aria2 Pro (Enhanced)
         run: |
-          wget -q https://github.com/P3TERX/aria2-builder/releases/download/1.37.0_2023.09.06/aria2-1.37.0-linux-gnu-64bit-build1.tar.gz
-          tar -zxvf aria2-1.37.0-linux-gnu-64bit-build1.tar.gz
+          wget -q https://github.com/P3TERX/Aria2-Pro-Core/releases/download/1.36.0_2021.08.22/aria2-1.36.0-static-linux-amd64.tar.gz
+          tar -zxvf aria2-1.36.0-static-linux-amd64.tar.gz
           chmod +x aria2c
           sudo mv aria2c /usr/local/bin/
       # ==================================================
