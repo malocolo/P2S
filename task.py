@@ -3,8 +3,6 @@ import argparse
 import os
 import time
 import requests
-import re
-from urllib.parse import urlparse
 from sqlalchemy import (
     Column,
     DateTime,
@@ -60,49 +58,44 @@ def delete_task():
     except Exception as e:
         print(f"Error deleting task: {e}")
 
-def extract_ipfs_cid(url):
-    # 匹配 bafy... (v1) 或 Qm... (v0)
-    match = re.search(r'(bafy[a-zA-Z0-9]{40,}|Qm[a-zA-Z0-9]{44})', url)
-    if match:
-        return match.group(1)
-    return None
+# === 浏览器仿真下载引擎 ===
+def download_file(url, filename):
+    print(f"[*] 启动下载: {filename}")
+    print(f"[*] 目标 URL: {url}")
+    
+    # 模拟真实浏览器的 Headers
+    # 关键点：Accept, Accept-Language, Range
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+        'Referer': 'https://dav.2dland.cn/',
+        'Range': 'bytes=0-', # 关键：告诉服务器我是流媒体播放器/下载器
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+    }
 
-def try_download_url(session, url, filename, description):
-    print(f"--- 尝试策略: {description} ---")
-    print(f"    URL: {url}")
     try:
+        session = requests.Session()
+        session.headers.update(headers)
+        
         start_time = time.time()
-        # 增加 connect timeout, 减少 read timeout
-        response = session.get(url, stream=True, timeout=(10, 30), allow_redirects=True)
+        # 允许重定向，设置较长的超时时间
+        response = session.get(url, stream=True, timeout=60, allow_redirects=True)
         
-        final_url = response.url
+        print(f"[*] 最终 URL: {response.url}")
+        print(f"[*] 状态码: {response.status_code}")
         
-        # 捕获 403 但返回 URL 供提取 CID
-        if response.status_code == 403:
-            print(f"[!] 403 Forbidden (IP限制) - {final_url}")
-            return False, final_url
-            
-        if response.status_code == 404 or response.status_code == 502:
-            print(f"[!] {response.status_code} - 文件未找到或网关错误")
-            return False, final_url
-            
         response.raise_for_status()
 
         total_size = int(response.headers.get('content-length', 0))
-        
-        # 检查内容类型，避免下载到 HTML 错误页
-        content_type = response.headers.get('Content-Type', '').lower()
-        if 'text/html' in content_type and total_size < 100000:
-             print("[!] 警告: 返回的是 HTML 页面，可能是错误提示，跳过。")
-             return False, final_url
-
         if total_size > 0:
-            print(f"[*] 连接成功! 大小: {total_size / 1024 / 1024:.2f} MB")
+            print(f"[*] 文件大小: {total_size / 1024 / 1024:.2f} MB")
         else:
-            print(f"[*] 连接成功! (流式)")
+            print(f"[*] 文件大小: 未知 (流式传输)")
 
         downloaded = 0
-        chunk_size = 1024 * 1024
+        chunk_size = 1024 * 1024 
         
         with open(filename, 'wb') as f:
             for chunk in response.iter_content(chunk_size=chunk_size):
@@ -115,77 +108,11 @@ def try_download_url(session, url, filename, description):
                              print(f"--> 进度: {percent:.2f}%")
         
         print(f"[*] 下载成功！耗时: {time.time() - start_time:.2f}s")
-        return True, final_url
-        
-    except Exception as e:
-        print(f"[!] 错误: {e}")
-        return False, url
-
-def download_engine(initial_url, filename, user_agent):
-    print(f"[*] 启动下载任务: {filename}")
-    
-    # 提取纯文件名 (用于 IPFS 路径)
-    # 之前错误的原因是把 downloads/xx.mp4 拼进去了
-    clean_filename = os.path.basename(filename) 
-    
-    parsed = urlparse(initial_url)
-    domain = f"{parsed.scheme}://{parsed.netloc}/"
-    
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': user_agent,
-        'Referer': domain,
-    })
-
-    # 1. 尝试原始链接
-    success, last_url = try_download_url(session, initial_url, filename, "原始链接")
-    if success:
         return True
 
-    # 2. 穿墙模式
-    print(f"[*] 检查链接是否包含 CID: {last_url}")
-    cid = extract_ipfs_cid(last_url)
-    if not cid:
-        cid = extract_ipfs_cid(initial_url)
-
-    if cid:
-        print(f"[*] 捕获到 IPFS CID: {cid}，启动公共网关轮询...")
-        session.headers.pop('Referer', None) # 公共网关不需要 Referer
-        
-        # 不同的路径组合
-        # 组合1: ipfs/<cid>/<filename> (针对文件夹 CID)
-        # 组合2: ipfs/<cid> (针对文件 CID)
-        paths_to_try = [
-            clean_filename, # 优先尝试带文件名
-            ""              # 其次尝试纯 CID
-        ]
-        
-        # 优质公共网关列表
-        base_gateways = [
-            "https://gateway.pinata.cloud/ipfs",
-            "https://ipfs.io/ipfs",
-            "https://dweb.link/ipfs",
-            "https://4everland.io/ipfs",
-            "https://w3s.link/ipfs"
-        ]
-        
-        for path_suffix in paths_to_try:
-            for base_gw in base_gateways:
-                # 拼接 URL
-                if path_suffix:
-                    gw_url = f"{base_gw}/{cid}/{path_suffix}"
-                    desc = f"网关[{base_gw}] + 文件名"
-                else:
-                    gw_url = f"{base_gw}/{cid}"
-                    desc = f"网关[{base_gw}] + 纯CID"
-                
-                success, _ = try_download_url(session, gw_url, filename, desc)
-                if success:
-                    return True
-    else:
-        print("[!] 未能提取到 CID。")
-
-    return False
+    except Exception as e:
+        print(f"[!] 下载失败: {e}")
+        return False
 
 if __name__ == "__main__":
     if args.opt == "query":
@@ -204,11 +131,8 @@ if __name__ == "__main__":
             
             save_path = os.path.join("downloads", file_name)
             
-            # 使用更通用的 UA
-            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            
-            if not download_engine(raw_url, save_path, ua):
-                print("[X] 最终失败。")
+            # 直接尝试下载，依赖 WARP 解决 IP 问题
+            if not download_file(raw_url, save_path):
                 sys.exit(1)
         else:
             print("URL 格式错误")
