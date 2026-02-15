@@ -1,31 +1,24 @@
-import json
 import sys
 import argparse
 import os
-
 from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
-    ForeignKey,
     Integer,
     String,
-    Text,
     create_engine,
 )
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base  # 更新了导入方式以消除警告
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.sql import func
-
 
 parser = argparse.ArgumentParser(description="操作数据库")
 parser.add_argument("--opt", help="操作", default="query")
 parser.add_argument("--con", help="数据库链接地址", default="")
 parser.add_argument("--name", help="文件名称", default="")
 
-
 args = parser.parse_args()
-
 
 engine = create_engine(
     args.con,
@@ -39,7 +32,6 @@ Base = declarative_base()
 
 class Task(Base):
     __tablename__ = "task"
-
     id = Column(Integer, unique=True, primary_key=True)
     status = Column(String, index=True)
     sort = Column(Integer)
@@ -50,9 +42,10 @@ class Task(Base):
 def find_one_and_update():
     with Session(engine) as session:
         task = db.query(Task).filter(Task.status == "draft").first()
-        task.status = "published"
-        db.commit()
-        db.refresh(task)
+        if task:
+            task.status = "published"
+            session.commit()
+            session.refresh(task)
         return task
 
 
@@ -61,8 +54,8 @@ def delete_task():
         keyword = "##" + args.name
         task = db.query(Task).filter(Task.url.like(f"%{keyword}")).first()
         if task is not None:
-            db.delete(task)
-            db.commit()
+            session.delete(task)
+            session.commit()
 
 
 if __name__ == "__main__":
@@ -73,17 +66,20 @@ if __name__ == "__main__":
             quit()
             
         urlinfo = task.url.split("##")
-        file_name = urlinfo[0]
-        download_url = urlinfo[1]
+        
+        # === 核心修正：根据日志，[0]是链接，[1]是文件名 ===
+        download_url = urlinfo[0]
+        file_name = urlinfo[1]
+        # ===============================================
 
-        # 构建命令
-        # 注意：这里使用 f-string 更加清晰
-        # 确保 aria2.conf 就在脚本同级目录下
+        # 构建命令：确保包含重试逻辑
+        # 注意：--conf-path=aria2.conf 确保读取了 retry-on-403=true
         cmd = (
             f'aria2c --conf-path=aria2.conf '
             f'--seed-time=0 '
             f'--dir=downloads '
             f'--out="{file_name}" '
+            f'--console-log-level=notice '
             f'"{download_url}"'
         )
 
@@ -93,7 +89,14 @@ if __name__ == "__main__":
         print(f"执行命令: {cmd}")
         print("-" * 20)
 
-        os.system(cmd)
+        # 执行下载
+        exit_code = os.system(cmd)
+        
+        # 如果下载失败(非0)，不仅要退出，最好抛出错误让 GitHub Action 停止
+        if exit_code != 0:
+            print(f"错误: 下载失败，退出码 {exit_code}")
+            sys.exit(1)
+            
         quit()
 
     if args.opt == "delete":
