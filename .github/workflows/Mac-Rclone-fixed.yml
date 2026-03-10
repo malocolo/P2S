@@ -1,0 +1,178 @@
+name: Copy To Rclone on Mac
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  FILE_PATH: downloads
+
+concurrency:
+  group: mac-rclone-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /System/Volumes/Data/Library/Developer/CoreSimulator/Images/*.dmg || true
+          df -h
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install rclone
+        shell: bash
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Check dependencies
+        shell: bash
+        run: |
+          python --version
+          pip --version
+          rclone version
+
+      - name: Configure rclone
+        shell: bash
+        env:
+          RCLONE_ENV_FILE: ${{ secrets.RCLONE_CONF }}
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_ENV_FILE" > ~/.config/rclone/rclone.conf
+
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Downloading
+        id: downloading
+        shell: bash
+        env:
+          DB_CONNECT: ${{ secrets.DB_CONNECT }}
+        run: |
+          mkdir -p downloads
+
+          set +e
+          python task.py --opt="query" --con="$DB_CONNECT"
+          download_status=$?
+          set -e
+
+          filename=$(python -c "from pathlib import Path; files=sorted(p.name for p in Path('downloads').iterdir() if p.is_file() and not p.name.startswith('.') and not p.name.endswith('.part')); print(files[0] if files else '')")
+
+          if [ -z "$filename" ]; then
+            echo "No file downloaded in this run."
+            {
+              echo "path="
+              echo "filename="
+              echo "folder="
+              echo "size="
+              echo "download_status=$download_status"
+            } >> "$GITHUB_OUTPUT"
+
+            if [ "$download_status" -ne 0 ]; then
+              exit "$download_status"
+            fi
+            exit 0
+          fi
+
+          folder=$(sh folder.sh "$filename")
+          filesize=$(python -c "from pathlib import Path; print((Path('downloads') / '$filename').stat().st_size)")
+
+          {
+            echo "path=downloads/$filename"
+            echo "filename=$filename"
+            echo "folder=$folder"
+            echo "size=$filesize"
+            echo "download_status=$download_status"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Downloaded: $filename"
+          echo "Size: $filesize"
+
+          if [ "$download_status" -ne 0 ]; then
+            exit "$download_status"
+          fi
+
+      - name: Rclone copy
+        if: steps.downloading.outputs.filename != ''
+        shell: bash
+        run: |
+          rclone copy \
+            "${{ steps.downloading.outputs.path }}" \
+            "SPVR:/${{ steps.downloading.outputs.folder }}" \
+            --progress \
+            --stats 1s \
+            --verbose
+
+      - name: Requeue task when upload failed
+        if: failure() && steps.downloading.outputs.filename != ''
+        shell: bash
+        env:
+          DB_CONNECT: ${{ secrets.DB_CONNECT }}
+        run: |
+          python task.py --opt="requeue" --con="$DB_CONNECT" --name="${{ steps.downloading.outputs.filename }}"
+
+      - name: Save data
+        if: success() && steps.downloading.outputs.filename != ''
+        shell: bash
+        env:
+          DB_CONNECT: ${{ secrets.DB_CONNECT }}
+        run: |
+          python task.py --opt="delete" --con="$DB_CONNECT" --name="${{ steps.downloading.outputs.filename }}"
+
+      - name: Dispatch next run
+        if: success() && steps.downloading.outputs.filename != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/Mac-Rclone.yml/dispatches" \
+            -d '{"ref":"${{ github.ref_name }}","inputs":{}}'
+
+      - name: Notify upload result
+        if: success() && steps.downloading.outputs.filename != ''
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.BARK_KEY }}" ]; then
+            curl -fsS -o /dev/null \
+              "${{ secrets.BARK_KEY }}?title=上传结果&icon=https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png&group=Actions&body=${{ steps.downloading.outputs.filename }}上传成功&isArchive=0" || true
+          fi
+
+      - name: Notify failure
+        if: failure() && steps.downloading.outputs.filename != ''
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.BARK_KEY }}" ]; then
+            curl -fsS -o /dev/null \
+              "${{ secrets.BARK_KEY }}?title=上传结果&icon=https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png&group=Actions&body=${{ steps.downloading.outputs.filename }}失败并已回队&isArchive=0" || true
+          fi
