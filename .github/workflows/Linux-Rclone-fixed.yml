@@ -11,10 +11,6 @@ permissions:
 env:
   FILE_PATH: downloads
 
-concurrency:
-  group: linux-rclone-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: ubuntu-latest
