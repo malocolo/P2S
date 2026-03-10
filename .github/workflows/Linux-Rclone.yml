@@ -6,7 +6,7 @@ on:
     inputs:
       Url:
         description: 'Download Url'
-        required: false
+        required: true
         default: 'false'
 
 permissions:
